@@ -11,12 +11,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/render"
-	"github.com/shoenig/test/interfaces"
 )
 
 var (
 	startTime time.Time
-	propObj map[string]interface{}
+	propObj   map[string]interface{}
 	instances []string
 )
 
@@ -25,21 +24,21 @@ func init() {
 }
 
 type UpMetric struct {
-	Uptime time.Duration `json:"uptime"`
-	Instances []string `json:"instances"`
+	Uptime    time.Duration `json:"uptime"`
+	Instances []string      `json:"instances"`
 }
 
 func ScheduledJob() {
-	log.Println("Scheduled run at", time.now())
+	log.Println("Scheduled run at", time.Now())
 }
 
 func readProperties(properties_file string) map[string]interface{} {
 	file, err := os.Open(properties_file)
-	if err := nil {
+	if err != nil {
 		log.Fatal(err)
 	}
 	defer file.Close()
-	if json.NewDecoder(file).Decode(&propObj) ; err != nil {
+	if json.NewDecoder(file).Decode(&propObj); err != nil {
 		log.Fatal(err)
 	}
 	return propObj
@@ -62,15 +61,15 @@ func main() {
 		}
 	}()
 
-upSince := UpMetric{
-	Uptime: time.Since(startTime),
-	Instances: instances,
-}
-mux.Use(middleware.Logger)
-mux.Get("/status", func(w http.ResponseWriter, r *http.Request){
-	render.JSON(w, r, upSince)
-})
+	upSince := UpMetric{
+		Uptime:    time.Since(startTime),
+		Instances: instances,
+	}
+	mux.Use(middleware.Logger)
+	mux.Get("/status", func(w http.ResponseWriter, r *http.Request) {
+		render.JSON(w, r, upSince)
+	})
 
-log.Println("Listening on 127.0.0.1:3000")
-http.ListenAndServe(":3000", mux)
+	log.Println("Listening on 127.0.0.1:3000")
+	http.ListenAndServe(":3000", mux)
 }
