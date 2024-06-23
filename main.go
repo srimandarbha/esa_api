@@ -7,10 +7,6 @@ import (
 	"os"
 	"reflect"
 	"time"
-
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/render"
 )
 
 var (
@@ -45,7 +41,7 @@ func readProperties(properties_file string) map[string]interface{} {
 }
 
 func main() {
-	mux := chi.NewRouter()
+	mux := http.NewServeMux()
 	propfile := readProperties("config.json")
 	v := reflect.ValueOf(propfile["esa_instances"])
 	for _, i := range v.MapKeys() {
@@ -65,9 +61,12 @@ func main() {
 		Uptime:    time.Since(startTime),
 		Instances: instances,
 	}
-	mux.Use(middleware.Logger)
-	mux.Get("/status", func(w http.ResponseWriter, r *http.Request) {
-		render.JSON(w, r, upSince)
+	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+		data, err := json.Marshal(upSince)
+		if err != nil {
+			log.Printf("Write failed: %v", err)
+		}
+		w.Write(data)
 	})
 
 	log.Println("Listening on 127.0.0.1:3000")
