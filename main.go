@@ -7,6 +7,8 @@ import (
 	"os"
 	"reflect"
 	"time"
+
+	_ "github.com/srimandarbha/esa_dispatch/model"
 )
 
 var (
