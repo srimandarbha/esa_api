@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -26,8 +27,27 @@ type UpMetric struct {
 	Instances []string      `json:"instances"`
 }
 
+func RetApiData(url string) (*http.Response, error) {
+	client := http.Client{}
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("accept", "application/json")
+	res, err := client.Do(req)
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+	return res, nil
+}
+
 func ScheduledJob() {
 	log.Println("Scheduled run at", time.Now())
+	res, err := RetApiData("https://api.weatherapi.com/v1/ip.json?q=8.8.8.8&key=d8b92e0a4c2b4472a5190813242306")
+	if err != nil {
+		log.Println(err)
+	}
+	defer res.Body.Close()
+	bodyBytes, _ := io.ReadAll(res.Body)
+	log.Println(string(bodyBytes))
 }
 
 func readProperties(properties_file string) map[string]interface{} {
@@ -43,7 +63,6 @@ func readProperties(properties_file string) map[string]interface{} {
 }
 
 func main() {
-	model.dbConn()
 	mux := http.NewServeMux()
 	propfile := readProperties("config.json")
 	v := reflect.ValueOf(propfile["esa_instances"])
