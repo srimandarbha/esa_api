@@ -41,6 +41,7 @@ func readProperties(properties_file string) map[string]interface{} {
 }
 
 func main() {
+	model.dbConn()
 	mux := http.NewServeMux()
 	propfile := readProperties("config.json")
 	v := reflect.ValueOf(propfile["esa_instances"])
