@@ -7,46 +7,44 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-func FlatDBInstance(filePath string) (*sql.DB, error) {
-	// Connect to the file-based database
-	diskDB, err := sql.Open("sqlite3", filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer diskDB.Close()
+var (
+	err error
+)
 
-	return diskDB, nil
+type Db struct {
+	Conn     *sql.DB
+	filePath string
 }
 
-func MemDBInstance() (*sql.DB, error) {
+func (db *Db) Instance(filePath string) (*sql.DB, error) {
 	// Connect to the file-based database
-	// Create an in-memory database
-	memDB, err := sql.Open("sqlite3", ":memory:")
+	db.Conn, err = sql.Open("sqlite3", filePath)
 	if err != nil {
 		return nil, err
 	}
-	defer memDB.Close()
-	return memDB, nil
+
+	return db.Conn, nil
 }
 
-func RestoreInMemoryDBFromFile(filePath string, tblName string) (*sql.DB, error) {
-	diskDB, err := FlatDBInstance("chinook.db")
+func RestoreInMemoryDBFromFile(filePath string, tblName string) (*sql.DB, *sql.DB, error) {
+	db := Db{}
+	diskDB, err := db.Instance(filePath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	memDB, _ := MemDBInstance()
+	memDB, _ := db.Instance("file::memory:?cache=shared")
 	// Backup the file-based database to the in-memory database
 	diskConn, err := diskDB.Conn(context.TODO())
 	if err != nil {
 		memDB.Close()
-		return nil, err
+		return nil, nil, err
 	}
 	defer diskConn.Close()
 
 	memConn, err := memDB.Conn(context.TODO())
 	if err != nil {
 		memDB.Close()
-		return nil, err
+		return nil, nil, err
 	}
 	defer memConn.Close()
 
@@ -54,14 +52,14 @@ func RestoreInMemoryDBFromFile(filePath string, tblName string) (*sql.DB, error)
 	_, err = memConn.ExecContext(context.TODO(), "ATTACH DATABASE ? AS file_db", filePath)
 	if err != nil {
 		memDB.Close()
-		return nil, err
+		return nil, nil, err
 	}
 
 	_, err = memConn.ExecContext(context.TODO(), "DROP TABLE  IF EXISTS ?; create TEMP table emp as select * from file_db.?; DETACH DATABASE file_db", tblName)
 	if err != nil {
 		memDB.Close()
-		return nil, err
+		return nil, nil, err
 	}
 
-	return memDB, nil
+	return diskDB, memDB, nil
 }
