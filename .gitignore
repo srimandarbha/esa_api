@@ -1,3 +1,4 @@
 esa_dispatch.exe
 esa_dispatch
 config.json
+*.db*

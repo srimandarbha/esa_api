@@ -3,63 +3,49 @@ package model
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
 var (
-	err error
+	err      error
+	filePath = "chinook.db?mode=memory&cache=shared"
 )
 
 type Db struct {
-	Conn     *sql.DB
-	filePath string
+	Conn *sql.DB
 }
 
-func (db *Db) Instance(filePath string) (*sql.DB, error) {
+func (db *Db) Init() (*sql.DB, *sql.DB, error) {
 	// Connect to the file-based database
 	db.Conn, err = sql.Open("sqlite3", filePath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	memDB, _ := sql.Open("sqlite3", "file::memory:?cache=shared")
 
-	return db.Conn, nil
+	return db.Conn, memDB, nil
 }
 
-func RestoreInMemoryDBFromFile(filePath string, tblName string) (*sql.DB, *sql.DB, error) {
+func DbInstance() (*sql.DB, *sql.DB, error) {
 	db := Db{}
-	diskDB, err := db.Instance(filePath)
-	if err != nil {
-		return nil, nil, err
-	}
-	memDB, _ := db.Instance("file::memory:?cache=shared")
-	// Backup the file-based database to the in-memory database
-	diskConn, err := diskDB.Conn(context.TODO())
-	if err != nil {
-		memDB.Close()
-		return nil, nil, err
-	}
-	defer diskConn.Close()
+	diskDB, memDB, err := db.Init()
+	return diskDB, memDB, err
+}
 
+func RestoreInMemoryDBFromFile(memDB *sql.DB, tblName string) {
 	memConn, err := memDB.Conn(context.TODO())
 	if err != nil {
 		memDB.Close()
-		return nil, nil, err
+		return
 	}
 	defer memConn.Close()
-
-	// Use SQLite's backup API to copy the file-based database to the in-memory database
-	_, err = memConn.ExecContext(context.TODO(), "ATTACH DATABASE ? AS file_db", filePath)
+	temp_query := fmt.Sprintf("ATTACH DATABASE '%s' AS file_db ; DROP TABLE  IF EXISTS emp; create TEMP table emp as select * from file_db.%s; DETACH DATABASE file_db", filePath, tblName)
+	_, err = memConn.ExecContext(context.TODO(), temp_query)
 	if err != nil {
 		memDB.Close()
-		return nil, nil, err
+		return
 	}
-
-	_, err = memConn.ExecContext(context.TODO(), "DROP TABLE  IF EXISTS ?; create TEMP table emp as select * from file_db.?; DETACH DATABASE file_db", tblName)
-	if err != nil {
-		memDB.Close()
-		return nil, nil, err
-	}
-
-	return diskDB, memDB, nil
+	fmt.Println("Restore to In-Memory DB from filedb completed")
 }
