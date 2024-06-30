@@ -10,7 +10,8 @@ import (
 
 var (
 	err      error
-	filePath = "chinook.db?mode=memory&cache=shared"
+	filePath = "chinook.db"
+	memory   = "file:chinook.db?mode=memory&cache=shared"
 )
 
 type Db struct {
@@ -23,7 +24,7 @@ func (db *Db) Init() (*sql.DB, *sql.DB, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	memDB, _ := sql.Open("sqlite3", "file::memory:?cache=shared")
+	memDB, _ := sql.Open("sqlite3", memory)
 
 	return db.Conn, memDB, nil
 }
@@ -41,7 +42,7 @@ func RestoreInMemoryDBFromFile(memDB *sql.DB, tblName string) {
 		return
 	}
 	defer memConn.Close()
-	temp_query := fmt.Sprintf("ATTACH DATABASE '%s' AS file_db ; DROP TABLE  IF EXISTS emp; create TEMP table emp as select * from file_db.%s; DETACH DATABASE file_db", filePath, tblName)
+	temp_query := fmt.Sprintf("ATTACH DATABASE '%s' AS file_db ; DROP TABLE  IF EXISTS emp; create TEMP table activity as select * from file_db.%s; DETACH DATABASE file_db", filePath, tblName)
 	_, err = memConn.ExecContext(context.TODO(), temp_query)
 	if err != nil {
 		memDB.Close()
