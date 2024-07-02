@@ -24,9 +24,9 @@ func init() {
 }
 
 type ServerDetails struct {
-	Id         int64      `json:"id"`
-	Time       *time.Time `json:"checkintime"`
-	ServerName string     `json:"server"`
+	Id         int64  `json:"id"`
+	Time       string `json:"checkintime"`
+	ServerName string `json:"server"`
 }
 
 type UnivSearch struct {
@@ -77,15 +77,15 @@ func ScheduledJob(fileDB *sql.DB, memDB *sql.DB) {
 		return
 	}
 	now := time.Now()
-	_, err = fileDB.Exec("CREATE TABLE IF NOT EXISTS activities ( id INTEGER NOT NULL PRIMARY KEY,  time DATETIME NOT NULL,  server TEXT  );")
+	_, err = memDB.Exec("CREATE TABLE IF NOT EXISTS activities ( id INTEGER NOT NULL PRIMARY KEY,  time DATETIME NOT NULL,  server TEXT  );")
 	checkErr(err)
 	for k, v := range univsearch {
 		insert_query := fmt.Sprintf("INSERT OR IGNORE INTO activities VALUES(%d,\"%s\",\"%s\");", k, now.Format(DDMMYYYYhhmmss), v.Name)
 		fmt.Println(insert_query)
-		_, err := fileDB.Exec(insert_query)
+		_, err := memDB.Exec(insert_query)
 		checkErr(err)
 	}
-	model.RestoreInMemoryDBFromFile(memDB, "activities")
+	model.RestoreInMemoryDBToFile(fileDB, "activities")
 }
 
 func readProperties(properties_file string) map[string]interface{} {
@@ -95,6 +95,52 @@ func readProperties(properties_file string) map[string]interface{} {
 	err = json.NewDecoder(file).Decode(&propObj)
 	checkErr(err)
 	return propObj
+}
+
+func queryFileDB(fileDB *sql.DB, query string) ([]ServerDetails, error) {
+	var servers []ServerDetails
+
+	rows, err := fileDB.Query("SELECT * FROM activities WHERE server LIKE ?", "%"+query+"%")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	// Collect results
+	for rows.Next() {
+		var server ServerDetails
+		if err := rows.Scan(&server.Id, &server.Time, &server.ServerName); err != nil {
+			return nil, err
+		}
+		servers = append(servers, server)
+	}
+
+	return servers, nil
+}
+
+func queryData(memDB *sql.DB, fileDB *sql.DB, query string) ([]ServerDetails, error) {
+	var servers []ServerDetails
+
+	// Try to query the in-memory database
+	rows, err := memDB.Query("SELECT * FROM activities WHERE server LIKE ?", "%"+query+"%")
+	if err != nil {
+		// If there's an error, fall back to the file-based database
+		fmt.Println("Error querying in-memory DB:", err)
+		return queryFileDB(fileDB, query)
+	}
+	defer rows.Close()
+
+	// Collect results
+	for rows.Next() {
+		var server ServerDetails
+		if err := rows.Scan(&server.Id, &server.Time, &server.ServerName); err != nil {
+			// If there's an error, fall back to the file-based database
+			fmt.Println("Error scanning rows in-memory DB:", err)
+			return queryFileDB(fileDB, query)
+		}
+		servers = append(servers, server)
+	}
+	return servers, nil
 }
 
 // Handler function for the search endpoint
@@ -124,23 +170,13 @@ func main() {
 	}
 	mux.HandleFunc("/search", func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("server")
-		servers := []ServerDetails{}
-
-		rows, err := diskDB.Query("SELECT * FROM activities WHERE server LIKE ?", "%"+query+"%")
+		// Query data from the databases
+		servers, err := queryData(memDB, diskDB, query)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		for rows.Next() {
-			var server ServerDetails
-			if err := rows.Scan(&server.Id, &server.Time, &server.ServerName); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			servers = append(servers, server)
-		}
-		defer rows.Close()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(servers)
 	})

@@ -9,9 +9,9 @@ import (
 )
 
 var (
-	err      error
-	filePath = "chinook.db"
-	memory   = "file:chinook.db?mode=memory&cache=shared"
+	err        error
+	filePath   = "chinook.db"
+	memoryPath = "file:chinook.db?mode=memory&cache=shared"
 )
 
 type Db struct {
@@ -24,7 +24,7 @@ func (db *Db) Init() (*sql.DB, *sql.DB, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	memDB, _ := sql.Open("sqlite3", memory)
+	memDB, _ := sql.Open("sqlite3", memoryPath)
 
 	return db.Conn, memDB, nil
 }
@@ -35,18 +35,18 @@ func DbInstance() (*sql.DB, *sql.DB, error) {
 	return diskDB, memDB, err
 }
 
-func RestoreInMemoryDBFromFile(memDB *sql.DB, tblName string) {
-	memConn, err := memDB.Conn(context.TODO())
+func RestoreInMemoryDBToFile(fileDB *sql.DB, tblName string) {
+	fileConn, err := fileDB.Conn(context.TODO())
 	if err != nil {
-		memDB.Close()
+		fileDB.Close()
 		return
 	}
-	defer memConn.Close()
-	temp_query := fmt.Sprintf("ATTACH DATABASE '%s' AS file_db ; DROP TABLE  IF EXISTS emp; create TEMP table activity as select * from file_db.%s; DETACH DATABASE file_db", filePath, tblName)
-	_, err = memConn.ExecContext(context.TODO(), temp_query)
+	defer fileConn.Close()
+	temp_query := fmt.Sprintf("ATTACH DATABASE '%s' AS file_db ; DROP TABLE  IF EXISTS activities; create table activities as select * from file_db.%s; DETACH DATABASE file_db", memoryPath, tblName)
+	_, err = fileConn.ExecContext(context.TODO(), temp_query)
 	if err != nil {
-		memDB.Close()
+		fileDB.Close()
 		return
 	}
-	fmt.Println("Restore to In-Memory DB from filedb completed")
+	fmt.Println("Restore from In-Memory DB to filedb completed")
 }
