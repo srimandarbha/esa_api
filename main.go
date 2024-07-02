@@ -24,6 +24,15 @@ func init() {
 	startTime = time.Now()
 }
 
+type Config struct {
+	EsaInstances map[string]InstanceDetails `json:"esainstances"`
+}
+
+type InstanceDetails struct {
+	Name  string `json:"name"`
+	Token string `json:"token"`
+}
+
 type ServerDetails struct {
 	Id         int64  `json:"id"`
 	Time       string `json:"checkintime"`
@@ -199,6 +208,23 @@ func main() {
 	for _, i := range v.MapKeys() {
 		instances = append(instances, i.String())
 	}
+	jsonData, err := os.Open("config.json")
+	checkErr(err)
+	var config Config
+	fmt.Println(jsonData)
+	err = json.NewDecoder(jsonData).Decode(&config)
+	checkErr(err)
+	fmt.Println(config.EsaInstances)
+	instanceMap := make(map[string]map[string]string)
+
+	for key, details := range config.EsaInstances {
+		// Store details in the map
+		instanceMap[key] = map[string]string{
+			"name":  details.Name,
+			"token": details.Token,
+		}
+	}
+	fmt.Println(instanceMap)
 	Scheduled := time.NewTicker(30 * time.Second)
 	defer Scheduled.Stop()
 

@@ -1,7 +1,16 @@
 {
     "esa_instances": {
-        "UK_UAT": "UK_UAT_INSTANCES",
-        "HK_UAT": "UK_UAT_INSTANCES",
-        "UK_Prod_Linux": "UK_Prod_Linux_INSTANCES"
+        "UK_UAT": { 
+            "name": "UK_UAT_INSTANCES", 
+            "token": "Token"
+        },
+        "HK_UAT": { 
+            "name": "UK_UAT_INSTANCES", 
+            "token": "Token"
+        },
+        "UK_Prod_Linux": {
+             "name": "UK_UAT_INSTANCES", 
+             "token": "Token"
+        }
     }
 }
