@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"sync"
 	"time"
 
 	model "github.com/srimandarbha/esa_dispatch/models"
@@ -43,6 +44,8 @@ type UpMetric struct {
 	Instances []string      `json:"instances"`
 }
 
+type ResultsMap map[string][]UnivSearch
+
 func checkErr(err error) {
 	if err != nil {
 		fmt.Println(err)
@@ -50,41 +53,78 @@ func checkErr(err error) {
 	}
 }
 
-func RetreiveApiData(url string) (*http.Response, error) {
-	client := http.Client{}
-	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("accept", "application/json")
-	res, err := client.Do(req)
-	if err != nil {
-		fmt.Println(err)
-		return nil, err
+func RetreiveApiData(urls []string) (ResultsMap, error) {
+	results := make(ResultsMap)
+	var wg sync.WaitGroup
+	ch := make(chan struct {
+		url        string
+		univsearch []UnivSearch
+		err        error
+	}, len(urls))
+
+	for _, url := range urls {
+		wg.Add(1)
+		go func(url string) {
+			defer wg.Done()
+			client := http.Client{}
+			req, _ := http.NewRequest("GET", url, nil)
+			req.Header.Set("accept", "application/json")
+			res, err := client.Do(req)
+			if err != nil {
+				ch <- struct {
+					url        string
+					univsearch []UnivSearch
+					err        error
+				}{url, nil, err}
+				return
+			}
+			defer res.Body.Close()
+			var univsearch []UnivSearch
+			err = json.NewDecoder(res.Body).Decode(&univsearch)
+			ch <- struct {
+				url        string
+				univsearch []UnivSearch
+				err        error
+			}{url, univsearch, err}
+		}(url)
 	}
-	return res, nil
+
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+
+	for result := range ch {
+		if result.err != nil {
+			fmt.Println("Error fetching data from URL:", result.url, result.err)
+			continue
+		}
+		results[result.url] = result.univsearch
+	}
+
+	return results, nil
 }
 
-func ScheduledJob(fileDB *sql.DB, memDB *sql.DB) {
+func ScheduledJob(fileDB *sql.DB, memDB *sql.DB, urls []string) {
 	fmt.Println("Scheduled run at", time.Now())
-	res, err := RetreiveApiData("http://universities.hipolabs.com/search")
+	resultsmap, err := RetreiveApiData(urls)
 	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	var univsearch []UnivSearch
-	defer res.Body.Close()
-	err = json.NewDecoder(res.Body).Decode(&univsearch)
-	if err != nil {
-		fmt.Println(err)
+		fmt.Println("Error retrieving API data:", err)
 		return
 	}
 	now := time.Now()
 	_, err = memDB.Exec("CREATE TABLE IF NOT EXISTS activities ( id INTEGER NOT NULL PRIMARY KEY,  time DATETIME NOT NULL,  server TEXT  );")
 	checkErr(err)
-	for k, v := range univsearch {
-		insert_query := fmt.Sprintf("INSERT OR IGNORE INTO activities VALUES(%d,\"%s\",\"%s\");", k, now.Format(DDMMYYYYhhmmss), v.Name)
-		fmt.Println(insert_query)
-		_, err := memDB.Exec(insert_query)
-		checkErr(err)
+	for url, univsearch := range resultsmap {
+		fmt.Println(url)
+		for k, v := range univsearch {
+			insert_query := fmt.Sprintf("INSERT OR IGNORE INTO activities VALUES(%d,\"%s\",\"%s\");", k, now.Format(DDMMYYYYhhmmss), v.Name)
+			fmt.Println(insert_query)
+			_, err := memDB.Exec(insert_query)
+			checkErr(err)
+		}
 	}
+	fmt.Println("Executing push of data from memory to filedb ")
 	model.RestoreInMemoryDBToFile(fileDB, "activities")
 }
 
@@ -146,6 +186,11 @@ func queryData(memDB *sql.DB, fileDB *sql.DB, query string) ([]ServerDetails, er
 // Handler function for the search endpoint
 
 func main() {
+	urls := []string{
+		"http://universities.hipolabs.com/search",
+		"http://universities.hipolabs.com/search",
+	}
+
 	mux := http.NewServeMux()
 	propfile := readProperties("config.json")
 	diskDB, memDB, err := model.DbInstance()
@@ -160,7 +205,7 @@ func main() {
 	go func() {
 		for t := range Scheduled.C {
 			fmt.Println("Run at", t)
-			ScheduledJob(diskDB, memDB)
+			ScheduledJob(diskDB, memDB, urls)
 		}
 	}()
 

@@ -38,14 +38,15 @@ func DbInstance() (*sql.DB, *sql.DB, error) {
 func RestoreInMemoryDBToFile(fileDB *sql.DB, tblName string) {
 	fileConn, err := fileDB.Conn(context.TODO())
 	if err != nil {
-		fileDB.Close()
+		fmt.Println(err)
 		return
 	}
 	defer fileConn.Close()
-	temp_query := fmt.Sprintf("ATTACH DATABASE '%s' AS file_db ; DROP TABLE  IF EXISTS activities; create table activities as select * from file_db.%s; DETACH DATABASE file_db", memoryPath, tblName)
+	temp_query := fmt.Sprintf("ATTACH DATABASE '%s' AS file_db ; DROP TABLE  IF EXISTS activities; create table %s as select * from file_db.activities; DETACH DATABASE file_db", memoryPath, tblName)
+	fmt.Println(temp_query)
 	_, err = fileConn.ExecContext(context.TODO(), temp_query)
 	if err != nil {
-		fileDB.Close()
+		fmt.Println(err)
 		return
 	}
 	fmt.Println("Restore from In-Memory DB to filedb completed")
