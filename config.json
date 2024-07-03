@@ -1,15 +1,15 @@
 {
     "esa_instances": {
         "UK_UAT": { 
-            "name": "UK_UAT_INSTANCES", 
+            "url": "http://universities.hipolabs.com/search", 
             "token": "Token"
         },
         "HK_UAT": { 
-            "name": "UK_UAT_INSTANCES", 
+            "url": "http://universities.hipolabs.com/search", 
             "token": "Token"
         },
         "UK_Prod_Linux": {
-             "name": "UK_UAT_INSTANCES", 
+             "url": "http://universities.hipolabs.com/search", 
              "token": "Token"
         }
     }

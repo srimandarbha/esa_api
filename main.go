@@ -4,9 +4,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
-	"reflect"
 	"sync"
 	"time"
 
@@ -14,8 +14,8 @@ import (
 )
 
 var (
-	startTime      time.Time
-	propObj        map[string]interface{}
+	startTime time.Time
+	//propObj        map[string]interface{}
 	instances      []string
 	DDMMYYYYhhmmss = "2006-01-02 15:04:05"
 )
@@ -24,13 +24,14 @@ func init() {
 	startTime = time.Now()
 }
 
-type Config struct {
-	EsaInstances map[string]InstanceDetails `json:"esainstances"`
+type InstanceDetails struct {
+	Url   string `json:"url"`
+	Token string `json:"token"`
 }
 
-type InstanceDetails struct {
-	Name  string `json:"name"`
-	Token string `json:"token"`
+// Define the Config struct
+type Config struct {
+	EsaInstances map[string]InstanceDetails `json:"esa_instances"`
 }
 
 type ServerDetails struct {
@@ -137,6 +138,7 @@ func ScheduledJob(fileDB *sql.DB, memDB *sql.DB, urls []string) {
 	model.RestoreInMemoryDBToFile(fileDB, "activities")
 }
 
+/*
 func readProperties(properties_file string) map[string]interface{} {
 	file, err := os.Open(properties_file)
 	checkErr(err)
@@ -144,7 +146,7 @@ func readProperties(properties_file string) map[string]interface{} {
 	err = json.NewDecoder(file).Decode(&propObj)
 	checkErr(err)
 	return propObj
-}
+} */
 
 func queryFileDB(fileDB *sql.DB, query string) ([]ServerDetails, error) {
 	var servers []ServerDetails
@@ -201,28 +203,29 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	propfile := readProperties("config.json")
 	diskDB, memDB, err := model.DbInstance()
 	checkErr(err)
-	v := reflect.ValueOf(propfile["esa_instances"])
-	for _, i := range v.MapKeys() {
-		instances = append(instances, i.String())
-	}
-	jsonData, err := os.Open("config.json")
-	checkErr(err)
-	var config Config
-	fmt.Println(jsonData)
-	err = json.NewDecoder(jsonData).Decode(&config)
-	checkErr(err)
-	fmt.Println(config.EsaInstances)
 	instanceMap := make(map[string]map[string]string)
+	jsonFile, err := os.Open("config.json")
+	checkErr(err)
+	defer jsonFile.Close()
+
+	byteValue, err := ioutil.ReadAll(jsonFile)
+	checkErr(err)
+
+	// Parse the JSON data
+	var config Config
+
+	err = json.Unmarshal(byteValue, &config)
+	checkErr(err)
 
 	for key, details := range config.EsaInstances {
 		// Store details in the map
 		instanceMap[key] = map[string]string{
-			"name":  details.Name,
+			"name":  details.Url,
 			"token": details.Token,
 		}
+		instances = append(instances, details.Url)
 	}
 	fmt.Println(instanceMap)
 	Scheduled := time.NewTicker(30 * time.Second)
