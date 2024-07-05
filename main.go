@@ -65,24 +65,22 @@ func checkErr(err error) {
 	}
 }
 
-func RetreiveApiData(urls []string) (ResultsMap, error) {
-	for key, value := range instanceMap {
-		fmt.Printf("Instance: %s, Key: %s, Value: %s \n", key, value["url"], value["token"])
-	}
+func RetreiveApiData(instanceMap map[string]map[string]string) (ResultsMap, error) {
 	results := make(ResultsMap)
 	var wg sync.WaitGroup
 	ch := make(chan struct {
 		url        string
 		univsearch []UnivSearch
 		err        error
-	}, len(urls))
+	}, len(instanceMap))
 
-	for _, url := range urls {
+	for key, value := range instanceMap {
 		wg.Add(1)
 		go func(url string) {
 			defer wg.Done()
+			fmt.Printf("Instance: %s, Url: %s, Token: %s\n", key, value["url"], value["token"])
 			client := http.Client{}
-			req, _ := http.NewRequest("GET", url, nil)
+			req, _ := http.NewRequest("GET", value["url"], nil)
 			req.Header.Set("accept", "application/json")
 			res, err := client.Do(req)
 			if err != nil {
@@ -101,7 +99,7 @@ func RetreiveApiData(urls []string) (ResultsMap, error) {
 				univsearch []UnivSearch
 				err        error
 			}{url, univsearch, err}
-		}(url)
+		}(value["url"])
 	}
 
 	go func() {
@@ -120,9 +118,9 @@ func RetreiveApiData(urls []string) (ResultsMap, error) {
 	return results, nil
 }
 
-func ScheduledJob(fileDB *sql.DB, memDB *sql.DB, urls []string) {
+func ScheduledJob(fileDB *sql.DB, memDB *sql.DB, instanceMap map[string]map[string]string) {
 	fmt.Println("Scheduled run at", time.Now())
-	resultsmap, err := RetreiveApiData(urls)
+	resultsmap, err := RetreiveApiData(instanceMap)
 	if err != nil {
 		fmt.Printf("Error retrieving API data: %v", err)
 		return
@@ -214,9 +212,6 @@ func main() {
 	}
 
 	instances, instanceMap := readProperties(propertiesFile)
-	urls := []string{
-		"http://universities.hipolabs.com/search",
-	}
 
 	mux := http.NewServeMux()
 	diskDB, memDB, err := model.DbInstance()
@@ -229,7 +224,7 @@ func main() {
 	go func() {
 		for t := range Scheduled.C {
 			fmt.Println("Run at", t)
-			ScheduledJob(diskDB, memDB, urls)
+			ScheduledJob(diskDB, memDB, instanceMap)
 		}
 	}()
 
