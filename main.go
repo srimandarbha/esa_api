@@ -7,17 +7,19 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	model "github.com/srimandarbha/esa_dispatch/models"
 )
 
 var (
-	startTime time.Time
-	//propObj        map[string]interface{}
+	startTime      time.Time
 	instances      []string
 	DDMMYYYYhhmmss = "2006-01-02 15:04:05"
+	instanceMap    = make(map[string]map[string]string)
 )
 
 func init() {
@@ -64,6 +66,9 @@ func checkErr(err error) {
 }
 
 func RetreiveApiData(urls []string) (ResultsMap, error) {
+	for key, value := range instanceMap {
+		fmt.Printf("Instance: %s, Key: %s, Value: %s \n", key, value["url"], value["token"])
+	}
 	results := make(ResultsMap)
 	var wg sync.WaitGroup
 	ch := make(chan struct {
@@ -106,7 +111,7 @@ func RetreiveApiData(urls []string) (ResultsMap, error) {
 
 	for result := range ch {
 		if result.err != nil {
-			fmt.Println("Error fetching data from URL:", result.url, result.err)
+			fmt.Printf("Error fetching data from URL: %s, Error: %v", result.url, result.err)
 			continue
 		}
 		results[result.url] = result.univsearch
@@ -119,7 +124,7 @@ func ScheduledJob(fileDB *sql.DB, memDB *sql.DB, urls []string) {
 	fmt.Println("Scheduled run at", time.Now())
 	resultsmap, err := RetreiveApiData(urls)
 	if err != nil {
-		fmt.Println("Error retrieving API data:", err)
+		fmt.Printf("Error retrieving API data: %v", err)
 		return
 	}
 	now := time.Now()
@@ -138,15 +143,28 @@ func ScheduledJob(fileDB *sql.DB, memDB *sql.DB, urls []string) {
 	model.RestoreInMemoryDBToFile(fileDB, "activities")
 }
 
-/*
-func readProperties(properties_file string) map[string]interface{} {
-	file, err := os.Open(properties_file)
+func readProperties(propertiesFile string) ([]string, map[string]map[string]string) {
+	jsonFile, err := os.Open(propertiesFile)
 	checkErr(err)
-	defer file.Close()
-	err = json.NewDecoder(file).Decode(&propObj)
+	defer jsonFile.Close()
+
+	byteValue, err := ioutil.ReadAll(jsonFile)
 	checkErr(err)
-	return propObj
-} */
+
+	var config Config
+
+	err = json.Unmarshal(byteValue, &config)
+	checkErr(err)
+
+	for key, details := range config.EsaInstances {
+		instanceMap[key] = map[string]string{
+			"url":   details.Url,
+			"token": details.Token,
+		}
+		instances = append(instances, details.Url)
+	}
+	return instances, instanceMap
+}
 
 func queryFileDB(fileDB *sql.DB, query string) ([]ServerDetails, error) {
 	var servers []ServerDetails
@@ -157,7 +175,6 @@ func queryFileDB(fileDB *sql.DB, query string) ([]ServerDetails, error) {
 	}
 	defer rows.Close()
 
-	// Collect results
 	for rows.Next() {
 		var server ServerDetails
 		if err := rows.Scan(&server.Id, &server.Time, &server.ServerName); err != nil {
@@ -172,21 +189,17 @@ func queryFileDB(fileDB *sql.DB, query string) ([]ServerDetails, error) {
 func queryData(memDB *sql.DB, fileDB *sql.DB, query string) ([]ServerDetails, error) {
 	var servers []ServerDetails
 
-	// Try to query the in-memory database
 	rows, err := memDB.Query("SELECT * FROM activities WHERE server LIKE ?", "%"+query+"%")
 	if err != nil {
-		// If there's an error, fall back to the file-based database
-		fmt.Println("Error querying in-memory DB:", err)
+		fmt.Printf("Error querying in-memory DB: %v", err)
 		return queryFileDB(fileDB, query)
 	}
 	defer rows.Close()
 
-	// Collect results
 	for rows.Next() {
 		var server ServerDetails
 		if err := rows.Scan(&server.Id, &server.Time, &server.ServerName); err != nil {
-			// If there's an error, fall back to the file-based database
-			fmt.Println("Error scanning rows in-memory DB:", err)
+			fmt.Printf("Error scanning rows in-memory DB: %v", err)
 			return queryFileDB(fileDB, query)
 		}
 		servers = append(servers, server)
@@ -194,39 +207,21 @@ func queryData(memDB *sql.DB, fileDB *sql.DB, query string) ([]ServerDetails, er
 	return servers, nil
 }
 
-// Handler function for the search endpoint
-
 func main() {
+	propertiesFile := "config.json"
+	if envFile := os.Getenv("CONFIG_FILE"); envFile != "" {
+		propertiesFile = envFile
+	}
+
+	instances, instanceMap := readProperties(propertiesFile)
 	urls := []string{
-		"http://universities.hipolabs.com/search",
 		"http://universities.hipolabs.com/search",
 	}
 
 	mux := http.NewServeMux()
 	diskDB, memDB, err := model.DbInstance()
 	checkErr(err)
-	instanceMap := make(map[string]map[string]string)
-	jsonFile, err := os.Open("config.json")
-	checkErr(err)
-	defer jsonFile.Close()
 
-	byteValue, err := ioutil.ReadAll(jsonFile)
-	checkErr(err)
-
-	// Parse the JSON data
-	var config Config
-
-	err = json.Unmarshal(byteValue, &config)
-	checkErr(err)
-
-	for key, details := range config.EsaInstances {
-		// Store details in the map
-		instanceMap[key] = map[string]string{
-			"name":  details.Url,
-			"token": details.Token,
-		}
-		instances = append(instances, details.Url)
-	}
 	fmt.Println(instanceMap)
 	Scheduled := time.NewTicker(30 * time.Second)
 	defer Scheduled.Stop()
@@ -238,13 +233,8 @@ func main() {
 		}
 	}()
 
-	upSince := UpMetric{
-		Uptime:    time.Since(startTime),
-		Instances: instances,
-	}
 	mux.HandleFunc("/search", func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("server")
-		// Query data from the databases
 		servers, err := queryData(memDB, diskDB, query)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -256,6 +246,10 @@ func main() {
 	})
 
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+		upSince := UpMetric{
+			Uptime:    time.Since(startTime),
+			Instances: instances,
+		}
 		data, err := json.Marshal(upSince)
 		if err != nil {
 			fmt.Printf("Write failed: %v", err)
@@ -263,9 +257,35 @@ func main() {
 		w.Write(data)
 	})
 
-	defer diskDB.Close()
-	defer memDB.Close()
+	server := &http.Server{
+		Addr:    ":3000",
+		Handler: mux,
+	}
+
+	// Graceful shutdown handling
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-stop
+		fmt.Println("Shutting down server...")
+
+		if err := server.Close(); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		if err := diskDB.Close(); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		if err := memDB.Close(); err != nil {
+			fmt.Println("memDB Close:", err)
+			os.Exit(0)
+		}
+		fmt.Println("Server gracefully stopped")
+	}()
 
 	fmt.Println("Listening on 127.0.0.1:3000")
-	http.ListenAndServe(":3000", mux)
+	if err := server.ListenAndServe(); err != http.ErrServerClosed {
+		fmt.Println(err)
+	}
 }
