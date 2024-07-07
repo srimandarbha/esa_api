@@ -15,6 +15,13 @@ var (
 	memoryPath = "file:chinook.db?mode=memory&cache=shared"
 )
 
+type User struct {
+	ID       int
+	Username string
+	Password string
+	IsAdmin  bool
+}
+
 type Db struct {
 	FileDB *sql.DB
 	MemDB  *sql.DB
@@ -57,7 +64,8 @@ func InitializeMemoryDB(memDB *sql.DB) {
 		CREATE TABLE IF NOT EXISTS activities (
 			id INTEGER NOT NULL PRIMARY KEY,
 			time DATETIME NOT NULL,
-			server TEXT
+			server TEXT,
+			url TEXT
 		);
 	`
 	_, err := memDB.Exec(createTableStmt)

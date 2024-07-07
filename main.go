@@ -37,12 +37,6 @@ type Config struct {
 	EsaInstances map[string]InstanceDetails `json:"esa_instances"`
 }
 
-type ServerDetails struct {
-	Id         int64  `json:"id"`
-	Time       string `json:"checkintime"`
-	ServerName string `json:"server"`
-}
-
 type UnivSearch struct {
 	Code     string
 	Name     string
@@ -127,13 +121,13 @@ func ScheduledJob(fileDB *sql.DB, memDB *sql.DB, instanceMap map[string]map[stri
 		return
 	}
 	now := time.Now()
-	_, err = fileDB.Exec("CREATE TABLE IF NOT EXISTS activities ( id INTEGER NOT NULL PRIMARY KEY,  time DATETIME NOT NULL,  server TEXT  );")
+	_, err = fileDB.Exec("CREATE TABLE IF NOT EXISTS activities ( id INTEGER NOT NULL PRIMARY KEY,  time DATETIME NOT NULL,  server TEXT, url TEXT );")
 	fmt.Printf("activities table created on fileDB")
 	checkErr(err)
 	for url, univsearch := range resultsmap {
 		fmt.Println(url)
 		for k, v := range univsearch {
-			insert_query := fmt.Sprintf("INSERT OR IGNORE INTO activities VALUES(%d,\"%s\",\"%s\");", k, now.Format(DDMMYYYYhhmmss), strings.ReplaceAll(v.Name, `"`, `""`))
+			insert_query := fmt.Sprintf("INSERT OR IGNORE INTO activities VALUES(%d,\"%s\",\"%s\", \"%s\");", k, now.Format(DDMMYYYYhhmmss), strings.ReplaceAll(v.Name, `"`, `""`), url)
 			//fmt.Println(insert_query)
 			_, err := fileDB.Exec(insert_query)
 			checkErr(err)
@@ -166,47 +160,6 @@ func readProperties(propertiesFile string) ([]string, map[string]map[string]stri
 	return instances, instanceMap
 }
 
-func queryFileDB(fileDB *sql.DB, query string) ([]ServerDetails, error) {
-	var servers []ServerDetails
-	fmt.Println("Query fetch from fileDB ")
-	rows, err := fileDB.Query("SELECT * FROM activities WHERE server LIKE ?", "%"+query+"%")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var server ServerDetails
-		if err := rows.Scan(&server.Id, &server.Time, &server.ServerName); err != nil {
-			return nil, err
-		}
-		servers = append(servers, server)
-	}
-
-	return servers, nil
-}
-
-func queryData(memDB *sql.DB, fileDB *sql.DB, query string) ([]ServerDetails, error) {
-	var servers []ServerDetails
-
-	rows, err := memDB.Query("SELECT * FROM activities_cache WHERE server LIKE ?", "%"+query+"%")
-	if err != nil {
-		fmt.Printf("Error querying in-memory DB: %v", err)
-		return queryFileDB(fileDB, query)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var server ServerDetails
-		if err := rows.Scan(&server.Id, &server.Time, &server.ServerName); err != nil {
-			fmt.Printf("Error scanning rows in-memory DB: %v", err)
-			return queryFileDB(fileDB, query)
-		}
-		servers = append(servers, server)
-	}
-	return servers, nil
-}
-
 func main() {
 	propertiesFile := "config.json"
 	if envFile := os.Getenv("CONFIG_FILE"); envFile != "" {
@@ -231,7 +184,7 @@ func main() {
 
 	mux.HandleFunc("/search", func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("server")
-		servers, err := queryData(dbInstance.MemDB, dbInstance.FileDB, query)
+		servers, err := models.queryData(dbInstance.MemDB, dbInstance.FileDB, query)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
