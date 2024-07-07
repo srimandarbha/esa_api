@@ -8,11 +8,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
-	model "github.com/srimandarbha/esa_dispatch/models"
+	model "github.com/srimandarbha/esa_dispatch/models" // Update this with the actual import path to your model package
 )
 
 var (
@@ -126,19 +127,20 @@ func ScheduledJob(fileDB *sql.DB, memDB *sql.DB, instanceMap map[string]map[stri
 		return
 	}
 	now := time.Now()
-	_, err = memDB.Exec("CREATE TABLE IF NOT EXISTS activities ( id INTEGER NOT NULL PRIMARY KEY,  time DATETIME NOT NULL,  server TEXT  );")
+	_, err = fileDB.Exec("CREATE TABLE IF NOT EXISTS activities ( id INTEGER NOT NULL PRIMARY KEY,  time DATETIME NOT NULL,  server TEXT  );")
+	fmt.Printf("activities table created on fileDB")
 	checkErr(err)
 	for url, univsearch := range resultsmap {
 		fmt.Println(url)
 		for k, v := range univsearch {
-			insert_query := fmt.Sprintf("INSERT OR IGNORE INTO activities VALUES(%d,\"%s\",\"%s\");", k, now.Format(DDMMYYYYhhmmss), v.Name)
-			fmt.Println(insert_query)
-			_, err := memDB.Exec(insert_query)
+			insert_query := fmt.Sprintf("INSERT OR IGNORE INTO activities VALUES(%d,\"%s\",\"%s\");", k, now.Format(DDMMYYYYhhmmss), strings.ReplaceAll(v.Name, `"`, `""`))
+			//fmt.Println(insert_query)
+			_, err := fileDB.Exec(insert_query)
 			checkErr(err)
 		}
 	}
 	fmt.Println("Executing push of data from memory to filedb ")
-	model.RestoreInMemoryDBToFile(fileDB, "activities")
+	model.RestoreInMemoryDBToFile(fileDB, memDB, "activities")
 }
 
 func readProperties(propertiesFile string) ([]string, map[string]map[string]string) {
@@ -166,7 +168,7 @@ func readProperties(propertiesFile string) ([]string, map[string]map[string]stri
 
 func queryFileDB(fileDB *sql.DB, query string) ([]ServerDetails, error) {
 	var servers []ServerDetails
-
+	fmt.Println("Query fetch from fileDB ")
 	rows, err := fileDB.Query("SELECT * FROM activities WHERE server LIKE ?", "%"+query+"%")
 	if err != nil {
 		return nil, err
@@ -187,7 +189,7 @@ func queryFileDB(fileDB *sql.DB, query string) ([]ServerDetails, error) {
 func queryData(memDB *sql.DB, fileDB *sql.DB, query string) ([]ServerDetails, error) {
 	var servers []ServerDetails
 
-	rows, err := memDB.Query("SELECT * FROM activities WHERE server LIKE ?", "%"+query+"%")
+	rows, err := memDB.Query("SELECT * FROM activities_cache WHERE server LIKE ?", "%"+query+"%")
 	if err != nil {
 		fmt.Printf("Error querying in-memory DB: %v", err)
 		return queryFileDB(fileDB, query)
@@ -214,23 +216,22 @@ func main() {
 	instances, instanceMap := readProperties(propertiesFile)
 
 	mux := http.NewServeMux()
-	diskDB, memDB, err := model.DbInstance()
+	dbInstance, err := model.DbInstance()
 	checkErr(err)
-
-	fmt.Println(instanceMap)
+	model.InitializeMemoryDB(dbInstance.FileDB)
 	Scheduled := time.NewTicker(30 * time.Second)
 	defer Scheduled.Stop()
 
 	go func() {
 		for t := range Scheduled.C {
 			fmt.Println("Run at", t)
-			ScheduledJob(diskDB, memDB, instanceMap)
+			ScheduledJob(dbInstance.FileDB, dbInstance.MemDB, instanceMap)
 		}
 	}()
 
 	mux.HandleFunc("/search", func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("server")
-		servers, err := queryData(memDB, diskDB, query)
+		servers, err := queryData(dbInstance.MemDB, dbInstance.FileDB, query)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -268,11 +269,11 @@ func main() {
 			fmt.Println(err)
 			os.Exit(1)
 		}
-		if err := diskDB.Close(); err != nil {
+		if err := dbInstance.FileDB.Close(); err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
-		if err := memDB.Close(); err != nil {
+		if err := dbInstance.MemDB.Close(); err != nil {
 			fmt.Println("memDB Close:", err)
 			os.Exit(0)
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -15,39 +16,107 @@ var (
 )
 
 type Db struct {
-	Conn *sql.DB
+	FileDB *sql.DB
+	MemDB  *sql.DB
 }
 
-func (db *Db) Init() (*sql.DB, *sql.DB, error) {
+func (db *Db) Init() (*Db, error) {
 	// Connect to the file-based database
-	db.Conn, err = sql.Open("sqlite3", filePath)
+	db.FileDB, err = sql.Open("sqlite3", filePath)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	memDB, _ := sql.Open("sqlite3", memoryPath)
-
-	return db.Conn, memDB, nil
+	db.MemDB, err = sql.Open("sqlite3", memoryPath)
+	if err != nil {
+		return nil, err
+	}
+	return db, nil
 }
 
-func DbInstance() (*sql.DB, *sql.DB, error) {
-	db := Db{}
-	diskDB, memDB, err := db.Init()
-	return diskDB, memDB, err
+func DbInstance() (*Db, error) {
+	db := &Db{}
+	db, err := db.Init()
+	return db, err
 }
 
-func RestoreInMemoryDBToFile(fileDB *sql.DB, tblName string) {
-	fileConn, err := fileDB.Conn(context.TODO())
+func tableExists(db *sql.DB, tableName string) (bool, error) {
+	query := fmt.Sprintf("SELECT name FROM sqlite_master WHERE type='table' AND name='%s';", tableName)
+	row := db.QueryRow(query)
+	var name string
+	err := row.Scan(&name)
+	if err == sql.ErrNoRows {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func InitializeMemoryDB(memDB *sql.DB) {
+	createTableStmt := `
+		CREATE TABLE IF NOT EXISTS activities (
+			id INTEGER NOT NULL PRIMARY KEY,
+			time DATETIME NOT NULL,
+			server TEXT
+		);
+	`
+	_, err := memDB.Exec(createTableStmt)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Printf("Error creating table in memory DB: %v\n", err)
 		return
 	}
-	defer fileConn.Close()
-	temp_query := fmt.Sprintf("ATTACH DATABASE '%s' AS file_db ; DROP TABLE  IF EXISTS activities; create table %s as select * from file_db.activities; DETACH DATABASE file_db", memoryPath, tblName)
-	fmt.Println(temp_query)
-	_, err = fileConn.ExecContext(context.TODO(), temp_query)
+	fmt.Println("Table 'activities' created in memory DB")
+}
+
+func RestoreInMemoryDBToFile(fileDB *sql.DB, memDB *sql.DB, tblName string) {
+	ctx := context.TODO()
+
+	// Check if the table exists in the memory database
+	exists, err := tableExists(memDB, tblName)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("Error checking table existence:", err)
 		return
 	}
-	fmt.Println("Restore from In-Memory DB to filedb completed")
+	if !exists {
+		fmt.Printf("Table %s does not exist in the memory database.\n", tblName)
+	}
+
+	// Generate a unique alias for the attached database
+	alias := "file_db_" + fmt.Sprint(time.Now().UnixNano())
+
+	// Attach the file-based database
+	attachStmt := fmt.Sprintf("ATTACH DATABASE '%s' AS %s;", filePath, alias)
+	_, err = memDB.ExecContext(ctx, attachStmt)
+	if err != nil {
+		fmt.Println("Error attaching database:", err)
+		return
+	}
+	fmt.Println("Database attached")
+	// Drop the existing table in the file-based database
+	dropStmt := fmt.Sprintf("DROP TABLE IF EXISTS %s_cache;", tblName)
+	_, err = memDB.ExecContext(ctx, dropStmt)
+	if err != nil {
+		fmt.Println("Error dropping table:", err)
+		return
+	}
+	fmt.Println("Table dropped in file-based database")
+	// Copy the table from the memory database to the file-based database
+	copyStmt := fmt.Sprintf("CREATE TABLE %s_cache AS SELECT * FROM %s.%s;", tblName, alias, tblName)
+	_, err = memDB.ExecContext(ctx, copyStmt)
+	if err != nil {
+		fmt.Println("Error creating table:", err)
+		return
+	}
+	fmt.Println("Table created in file-based database")
+
+	// Detach the file-based database
+	detachStmt := fmt.Sprintf("DETACH DATABASE %s;", alias)
+	_, err = memDB.ExecContext(ctx, detachStmt)
+	if err != nil {
+		fmt.Println("Error detaching database:", err)
+		return
+	}
+	fmt.Println("Database detached")
+
+	fmt.Println("Restore from file DB to memory completed")
 }
