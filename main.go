@@ -13,7 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	model "github.com/srimandarbha/esa_dispatch/models" // Update this with the actual import path to your model package
+	handlers "github.com/srimandarbha/esa_dispatch/handlers"
+	model "github.com/srimandarbha/esa_dispatch/models"
 )
 
 var (
@@ -184,7 +185,7 @@ func main() {
 
 	mux.HandleFunc("/search", func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("server")
-		servers, err := models.queryData(dbInstance.MemDB, dbInstance.FileDB, query)
+		servers, err := model.QueryData(dbInstance.MemDB, dbInstance.FileDB, query)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -205,6 +206,8 @@ func main() {
 		}
 		w.Write(data)
 	})
+
+	http.HandleFunc("/login", handlers.LoginHandler(dbInstance.FileDB))
 
 	server := &http.Server{
 		Addr:    ":3000",

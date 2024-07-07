@@ -32,7 +32,7 @@ func queryFileDB(fileDB *sql.DB, query string) ([]ServerDetails, error) {
 	return servers, nil
 }
 
-func queryData(memDB *sql.DB, fileDB *sql.DB, query string) ([]ServerDetails, error) {
+func QueryData(memDB *sql.DB, fileDB *sql.DB, query string) ([]ServerDetails, error) {
 	var servers []ServerDetails
 
 	rows, err := memDB.Query("SELECT * FROM activities_cache WHERE server LIKE ?", "%"+query+"%")

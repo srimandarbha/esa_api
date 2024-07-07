@@ -7,8 +7,7 @@ import (
 	"time"
 
 	models "github.com/srimandarbha/esa_dispatch/models"
-	utils "github.com/srimandarbha/esa_dispatch/utils"
-
+	"github.com/srimandarbha/esa_dispatch/utils"
 	"golang.org/x/crypto/bcrypt"
 )
 
